@@ -39,17 +39,28 @@ pub const Server = struct {
         self.* = undefined;
     }
 
-    pub fn recv(self: Server, buf: []u8, flags: u0) !struct { []const u8, bool } {
-        return self.recvfrom(buf, flags, null);
+    pub fn recv(self: Server, buf: []u8, flags: u32) !Datagram {
+        var source = std.net.Address.initIp4(.{ 0, 0, 0, 0 }, 0);
+        var addr_len = source.getOsSockLen();
+        const MSG_TRUNC = 0x0020;
+        const recv_len = try std.os.recvfrom(self.sockfd, buf, flags | MSG_TRUNC, &source.any, &addr_len);
+        const data = buf[0..@min(buf.len, recv_len)];
+        return Datagram{
+            .source = source,
+            .destination = self.bind_address,
+            .data = data,
+            .recv_len = recv_len,
+        };
     }
+};
 
-    pub fn recvfrom(self: Server, buf: []u8, flags: u0, source_address: ?std.net.Address) !struct { []const u8, bool } {
-        const len = if (source_address) |address|
-            try std.os.recvfrom(self.sockfd, buf, flags, @constCast(&address.any), @constCast(&address.getOsSockLen()))
-        else
-            try std.os.recvfrom(self.sockfd, buf, flags, null, null);
+pub const Datagram = struct {
+    source: std.net.Address,
+    destination: std.net.Address,
+    data: []const u8,
+    recv_len: usize,
 
-        std.debug.print("{}\n", .{len});
-        return .{ buf[0..len], false };
+    pub fn isTruncated(self: Datagram) bool {
+        return self.data.len != self.recv_len;
     }
 };

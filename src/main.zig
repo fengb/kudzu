@@ -10,8 +10,12 @@ pub fn main() !void {
     defer server.deinit();
 
     std.debug.print("Test\n", .{});
+
     var buf: [0x1000]u8 = undefined;
-    _ = try server.recv(&buf, 0);
+    while (true) {
+        const datagram = try server.recv(&buf, 0);
+        std.debug.print("Truncated {} -- {any}\n", .{ datagram.isTruncated(), datagram });
+    }
 }
 
 test "simple test" {
