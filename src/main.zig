@@ -1,19 +1,17 @@
 const std = @import("std");
+const udp = @import("udp.zig");
+
+const MDNS_PORT = 5353;
 
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+    var server = try udp.Server.init(.{
+        .address = std.net.Address.initIp4(.{ 0, 0, 0, 0 }, 5353),
+    });
+    defer server.deinit();
 
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
-
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
-
-    try bw.flush(); // don't forget to flush!
+    std.debug.print("Test\n", .{});
+    var buf: [0x1000]u8 = undefined;
+    _ = try server.recv(&buf, 0);
 }
 
 test "simple test" {
