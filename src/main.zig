@@ -1,6 +1,7 @@
 const std = @import("std");
 const udp = @import("udp.zig");
 
+const MDNS_ADDR = [_]u8{ 224, 0, 0, 251 };
 const MDNS_PORT = 5353;
 
 pub fn main() !void {
@@ -8,13 +9,14 @@ pub fn main() !void {
         .address = std.net.Address.initIp4(.{ 0, 0, 0, 0 }, 5353),
     });
     defer server.deinit();
+    try server.addMembership(MDNS_ADDR);
 
-    std.debug.print("Test\n", .{});
+    std.debug.print("Bind {}\n", .{server.bind_address});
 
     var buf: [0x1000]u8 = undefined;
     while (true) {
         const datagram = try server.recv(&buf, 0);
-        std.debug.print("Truncated {} -- {any}\n", .{ datagram.isTruncated(), datagram });
+        std.debug.print("{}\n", .{datagram});
     }
 }
 

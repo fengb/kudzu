@@ -52,6 +52,29 @@ pub const Server = struct {
             .recv_len = recv_len,
         };
     }
+
+    const IpMreq = extern struct {
+        imr_multiaddr: u32,
+        imr_interface: u32,
+    };
+
+    pub fn addMembership(self: Server, multicast: [4]u8) !void {
+        const parsed = std.net.Ip4Address.init(multicast, 0);
+        const mreq = IpMreq{
+            .imr_multiaddr = parsed.sa.addr,
+            .imr_interface = self.bind_address.in.sa.addr,
+        };
+        try std.os.setsockopt(self.sockfd, std.os.IPPROTO.IP, std.os.system.IP.ADD_MEMBERSHIP, std.mem.asBytes(&mreq));
+    }
+
+    pub fn dropMembership(self: Server, multicast: std.net.Address) !void {
+        const parsed = std.net.Ip4Address.init(multicast, 0);
+        const mreq = IpMreq{
+            .imr_multiaddr = parsed.sa.addr,
+            .imr_interface = self.bind_address.in.sa.addr,
+        };
+        try std.os.setsockopt(self.sockfd, std.os.IPPROTO.IP, std.os.system.IP.REMOVE_MEMBERSHIP, std.mem.asBytes(&mreq));
+    }
 };
 
 pub const Datagram = struct {
@@ -62,5 +85,25 @@ pub const Datagram = struct {
 
     pub fn isTruncated(self: Datagram) bool {
         return self.data.len != self.recv_len;
+    }
+
+    pub fn format(
+        self: Datagram,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        try writer.print("{} -> {} ({} of {})\n", .{ self.source, self.destination, self.data.len, self.recv_len });
+
+        var to_write = self.data;
+        while (true) {
+            if (to_write.len <= 8) {
+                try writer.print("{}\n", .{std.fmt.fmtSliceHexLower(to_write)});
+                break;
+            } else {
+                try writer.print("{}\n", .{std.fmt.fmtSliceHexLower(to_write[0..8])});
+                to_write = to_write[8..];
+            }
+        }
     }
 };
