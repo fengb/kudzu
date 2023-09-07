@@ -1,5 +1,6 @@
 const std = @import("std");
 const udp = @import("udp.zig");
+const mdns = @import("mdns.zig");
 
 const MDNS_ADDR = [_]u8{ 224, 0, 0, 251 };
 const MDNS_PORT = 5353;
@@ -16,13 +17,12 @@ pub fn main() !void {
     var buf: [0x1000]u8 = undefined;
     while (true) {
         const datagram = try server.recv(&buf, 0);
-        std.debug.print("{}\n", .{datagram});
+        const message = mdns.DnsMessage.parse(datagram.data);
+        std.debug.print("{}\n", .{message});
     }
 }
 
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
+test {
+    _ = udp;
+    _ = mdns;
 }
