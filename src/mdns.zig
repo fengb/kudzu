@@ -43,50 +43,42 @@ pub const DnsMessage = struct {
 };
 
 pub const EncodedString = struct {
-    data: [:0]const u8,
+    data: []const u8,
 
-    pub fn parseFirst(data: []const u8) !EncodedString {
-        var iter = Iterator{ .data = data, .cursor = 0 };
-        while (iter.next()) |_| {
+    pub fn readFirst(stream: *std.io.FixedBufferStream([]const u8)) !EncodedString {
+        const start = stream.pos;
+        while (try Iterator.nextRaw(stream)) |_| {
             // TODO: maybe detect ASCII
         }
-        if (iter.cursor >= data.len) {
+        if (stream.pos > stream.buffer.len) {
             return error.EndOfStream;
         }
-        if (data[iter.cursor] != 0) {
-            return error.ParseFailure;
-        }
 
-        return EncodedString{ .data = data[0..iter.cursor :0] };
+        return EncodedString{ .data = stream.buffer[start..stream.pos] };
     }
 
     pub fn iterSegments(self: EncodedString) Iterator {
-        return Iterator{ .data = self.data, .cursor = 0 };
+        return Iterator{ .fbs = std.io.fixedBufferStream(self.data) };
     }
 
     const Iterator = struct {
-        data: []const u8,
-        cursor: usize,
+        fbs: std.io.FixedBufferStream([]const u8),
 
         pub fn next(iter: *Iterator) ?[]const u8 {
-            if (iter.cursor >= iter.data.len) {
-                // EndOfStream. This is an error if the underlying data isn't null terminated, but we check that elsewhere.
-                return null;
-            }
+            return nextRaw(&iter.fbs) catch unreachable;
+        }
 
-            const segment_length = iter.data[iter.cursor];
+        fn nextRaw(fbs: *std.io.FixedBufferStream([]const u8)) !?[]const u8 {
+            const reader = fbs.reader();
+
+            const segment_length = try reader.readByte();
             if (segment_length == 0) {
                 return null;
             }
 
-            iter.cursor += 1;
-            const start = iter.cursor;
-            iter.cursor += segment_length;
-            if (iter.cursor > iter.data.len) {
-                // Broken parse. This is an error but only the parser should throw an error.
-                return null;
-            }
-            return iter.data[start..iter.cursor];
+            const start = fbs.pos;
+            try reader.skipBytes(segment_length, .{});
+            return fbs.buffer[start..fbs.pos];
         }
     };
 
@@ -108,8 +100,9 @@ pub const EncodedString = struct {
 };
 
 test EncodedString {
+    var fbs = std.io.fixedBufferStream("\x03www\x0dxyzindustries\x03com\x00");
     var buffer: [0x1000]u8 = undefined;
 
-    const es = try EncodedString.parseFirst("\x03www\x0dxyzindustries\x03com\x00");
+    const es = try EncodedString.readFirst(&fbs);
     try std.testing.expectEqualStrings("www.xyzindustries.com", try std.fmt.bufPrint(&buffer, "{}", .{es}));
 }
