@@ -26,33 +26,43 @@ pub const DnsMessage = struct {
     authority_record_count: u16,
     additional_record_count: u16,
 
-    payload: []const u8,
-    raw_questions: []const u8,
+    raw: []const u8,
+    comptime question_start: comptime_int = 12,
+    answer_record_start: usize,
+    authority_record_start: usize,
+    additional_record_start: usize,
 
     pub fn parse(data: []const u8) !DnsMessage {
-        const question_count = std.mem.readIntBig(u16, data[4..6]);
-        const answer_record_count = std.mem.readIntBig(u16, data[6..8]);
-        const authority_record_count = std.mem.readIntBig(u16, data[8..10]);
-        const additional_record_count = std.mem.readIntBig(u16, data[10..12]);
+        const msg_stub: DnsMessage = undefined;
 
-        const payload = data[12..];
-        var fbs = std.io.fixedBufferStream(payload);
-        const start = fbs.pos;
-        for (0..1) |_| {
+        var fbs = std.io.fixedBufferStream(data);
+        const reader = fbs.reader();
+
+        const identification = try reader.readIntBig(u16);
+        const flags = try reader.readStruct(@TypeOf(msg_stub.flags));
+        const question_count = try reader.readIntBig(u16);
+        const answer_record_count = try reader.readIntBig(u16);
+        const authority_record_count = try reader.readIntBig(u16);
+        const additional_record_count = try reader.readIntBig(u16);
+
+        std.debug.assert(msg_stub.question_start == fbs.pos);
+        for (0..question_count) |_| {
             _ = try QuestionIterator.nextRaw(&fbs);
         }
-        const raw_questions = payload[start..fbs.pos];
+        const answer_record_start = fbs.pos;
 
         return .{
-            .identification = std.mem.readIntBig(u16, data[0..2]),
-            .flags = @bitCast(data[2..4].*),
+            .identification = identification,
+            .flags = flags,
             .question_count = question_count,
             .answer_record_count = answer_record_count,
             .authority_record_count = authority_record_count,
             .additional_record_count = additional_record_count,
 
-            .payload = payload,
-            .raw_questions = raw_questions,
+            .raw = data,
+            .answer_record_start = answer_record_start,
+            .authority_record_start = answer_record_start,
+            .additional_record_start = answer_record_start,
         };
     }
 
@@ -63,7 +73,9 @@ pub const DnsMessage = struct {
     };
 
     pub fn iterQuestions(self: DnsMessage) QuestionIterator {
-        return QuestionIterator{ .fbs = std.io.fixedBufferStream(self.raw_questions) };
+        var fbs = std.io.fixedBufferStream(self.raw);
+        fbs.seekTo(self.question_start) catch unreachable;
+        return QuestionIterator{ .fbs = fbs };
     }
 
     const QuestionIterator = struct {
@@ -92,6 +104,18 @@ pub const EncodedString = struct {
     data: []const u8,
 
     pub fn readFirst(stream: *std.io.FixedBufferStream([]const u8)) !EncodedString {
+        const reader = stream.reader();
+        const first = try reader.readByte();
+        if (first & 0xC0 == 0xC0) {
+            const second = try reader.readByte();
+            const target_position = @as(u16, first & 0x3F) << 8 | second;
+            var new_stream = stream.*;
+            try new_stream.seekTo(target_position);
+            return readFirst(&new_stream);
+        } else {
+            stream.pos -= 1; // put back read byte 😅
+        }
+
         const start = stream.pos;
         while (try Iterator.nextRaw(stream)) |_| {
             // TODO: maybe detect ASCII
@@ -146,35 +170,55 @@ pub const EncodedString = struct {
 };
 
 test EncodedString {
-    var fbs = std.io.fixedBufferStream("\x03www\x0dxyzindustries\x03com\x00");
     var buffer: [0x1000]u8 = undefined;
+    {
+        var fbs = std.io.fixedBufferStream("\x03www\x0dxyzindustries\x03com\x00");
 
-    const es = try EncodedString.readFirst(&fbs);
-    try std.testing.expectEqualStrings("www.xyzindustries.com", try std.fmt.bufPrint(&buffer, "{}", .{es}));
+        const es = try EncodedString.readFirst(&fbs);
+        try std.testing.expectEqualStrings("www.xyzindustries.com", try std.fmt.bufPrint(&buffer, "{}", .{es}));
+    }
+
+    {
+        var fbs = std.io.fixedBufferStream("\x03www\x03abc\x03xyz\x00" ++
+            // Compression support: 11xxxxxx yyyyyyyy
+            // Use the same value at position xxxxxxyyyyyyyy
+            "\xc0\x04");
+
+        const es1 = try EncodedString.readFirst(&fbs);
+        try std.testing.expectEqualStrings("www.abc.xyz", try std.fmt.bufPrint(&buffer, "{}", .{es1}));
+
+        // Ensure the fbs is reading in the correct location
+        try std.testing.expectEqual(@as(u8, 0xc0), fbs.buffer[fbs.pos]);
+        const es2 = try EncodedString.readFirst(&fbs);
+        try std.testing.expectEqualStrings("abc.xyz", try std.fmt.bufPrint(&buffer, "{}", .{es2}));
+    }
 }
 
 test DnsMessage {
+    var buffer: [0x1000]u8 = undefined;
     {
         const questions1 = @embedFile("test-data/questions1.dns");
         const message = try DnsMessage.parse(questions1);
+
+        try std.testing.expectEqual(@as(usize, 2), message.question_count);
         var iter = message.iterQuestions();
-        while (iter.next()) |question| {
-            std.debug.print("{any}\n", .{question});
-        }
-        std.debug.print("{any}\n", .{message.raw_questions});
-        std.debug.print("{any}\n", .{message.payload});
+
+        const question1 = iter.next() orelse return error.NotEnoughQuestions;
+        try std.testing.expectEqualStrings("foobar.local", try std.fmt.bufPrint(&buffer, "{}", .{question1.name}));
+
+        const question2 = iter.next() orelse return error.NotEnoughQuestions;
+        try std.testing.expectEqualStrings("foobar.local", try std.fmt.bufPrint(&buffer, "{}", .{question2.name}));
+
+        try std.testing.expectEqual(iter.next(), null);
     }
 
-    std.debug.print("\n\n", .{});
-
-    {
+    if (false) {
         const questions2 = @embedFile("test-data/questions2.dns");
         const message = try DnsMessage.parse(questions2);
         var iter = message.iterQuestions();
         while (iter.next()) |question| {
             std.debug.print("{any}\n", .{question});
         }
-        std.debug.print("{any}\n", .{message.raw_questions});
-        std.debug.print("{any}\n", .{message.payload});
+        std.debug.print("{any}\n", .{message.raw});
     }
 }
