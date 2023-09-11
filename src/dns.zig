@@ -40,9 +40,23 @@ pub const Message = struct {
 
         std.debug.assert(msg_stub.question_start == fbs.pos);
         for (0..question_count) |_| {
-            _ = try QuestionIterator.nextRaw(&fbs);
+            _ = try Question.read(&fbs);
         }
+
         const answer_record_start = fbs.pos;
+        for (0..answer_record_count) |_| {
+            _ = try Record.read(&fbs);
+        }
+
+        const authority_record_start = fbs.pos;
+        for (0..authority_record_count) |_| {
+            _ = try Record.read(&fbs);
+        }
+
+        const additional_record_start = fbs.pos;
+        for (0..additional_record_count) |_| {
+            _ = try Record.read(&fbs);
+        }
 
         return .{
             .identification = identification,
@@ -54,34 +68,33 @@ pub const Message = struct {
 
             .raw = data,
             .answer_record_start = answer_record_start,
-            .authority_record_start = answer_record_start,
-            .additional_record_start = answer_record_start,
+            .authority_record_start = authority_record_start,
+            .additional_record_start = additional_record_start,
         };
+    }
+
+    pub fn iterQuestions(self: Message) Iterator(Question) {
+        return Iterator(Question).init(self.raw, self.question_start, self.answer_record_start);
+    }
+
+    pub fn iterAnswers(self: Message) Iterator(Record) {
+        return Iterator(Record).init(self.raw, self.answer_record_start, self.authority_record_start);
+    }
+
+    pub fn iterAuthorities(self: Message) Iterator(Record) {
+        return Iterator(Record).init(self.raw, self.authority_record_start, self.additional_record_start);
+    }
+
+    pub fn iterAdditionals(self: Message) Iterator(Record) {
+        return Iterator(Record).init(self.raw, self.additional_record_start, self.raw.len);
     }
 
     const Question = struct {
         name: EncodedString,
         type: u16,
         class: u16,
-    };
 
-    pub fn iterQuestions(self: Message) QuestionIterator {
-        var fbs = std.io.fixedBufferStream(self.raw[0..self.answer_record_start]);
-        fbs.seekTo(self.question_start) catch unreachable;
-        return QuestionIterator{ .fbs = fbs };
-    }
-
-    const QuestionIterator = struct {
-        fbs: std.io.FixedBufferStream([]const u8),
-
-        pub fn next(self: *QuestionIterator) ?Question {
-            return nextRaw(&self.fbs) catch unreachable;
-        }
-
-        fn nextRaw(fbs: *std.io.FixedBufferStream([]const u8)) !?Question {
-            if (fbs.pos >= fbs.buffer.len) {
-                return null;
-            }
+        fn read(fbs: *std.io.FixedBufferStream([]const u8)) !Question {
             const reader = fbs.reader();
 
             return Question{
@@ -91,6 +104,51 @@ pub const Message = struct {
             };
         }
     };
+
+    const Record = struct {
+        name: EncodedString,
+        type: u16,
+        class: u16,
+        ttl: u32,
+        data: []const u8,
+
+        fn read(fbs: *std.io.FixedBufferStream([]const u8)) !Record {
+            const reader = fbs.reader();
+
+            return Record{
+                .name = try EncodedString.readFirst(fbs),
+                .type = try reader.readIntBig(u16),
+                .class = try reader.readIntBig(u16),
+                .ttl = try reader.readIntBig(u32),
+                .data = blk: {
+                    const length = try reader.readIntBig(u16);
+                    const start = fbs.pos;
+                    try reader.skipBytes(length, .{});
+                    break :blk fbs.buffer[start..][0..length];
+                },
+            };
+        }
+    };
+
+    fn Iterator(comptime T: type) type {
+        return struct {
+            fbs: std.io.FixedBufferStream([]const u8),
+
+            fn init(raw: []const u8, start: usize, end: usize) @This() {
+                var fbs = std.io.fixedBufferStream(raw[0..end]);
+                fbs.seekTo(start) catch unreachable;
+                return .{ .fbs = fbs };
+            }
+
+            pub fn next(self: *@This()) ?T {
+                if (self.fbs.pos >= self.fbs.buffer.len) {
+                    return null;
+                }
+
+                return T.read(&self.fbs) catch unreachable;
+            }
+        };
+    }
 };
 
 pub const EncodedString = struct {
@@ -220,10 +278,20 @@ test Message {
     {
         const questions2 = @embedFile("test-data/questions2.dns");
         const message = try Message.parse(questions2);
-        std.debug.print("{any}\n", .{message});
-        var iter = message.iterQuestions();
-        while (iter.next()) |question| {
-            std.debug.print("{any}\n", .{question});
+
+        {
+            var iter = message.iterQuestions();
+            while (iter.next()) |question| {
+                std.debug.print("{any}\n", .{question});
+            }
+        }
+
+        {
+            std.debug.print("--ANSWERS--\n", .{});
+            var iter = message.iterAnswers();
+            while (iter.next()) |answer| {
+                std.debug.print("{any}\n", .{answer});
+            }
         }
     }
 }
