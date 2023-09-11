@@ -1,6 +1,6 @@
 const std = @import("std");
 const udp = @import("udp.zig");
-const mdns = @import("mdns.zig");
+const dns = @import("dns.zig");
 
 const MDNS_ADDR = [_]u8{ 224, 0, 0, 251 };
 const MDNS_PORT = 5353;
@@ -17,12 +17,12 @@ pub fn main() !void {
     var buf: [0x1000]u8 = undefined;
     while (true) {
         const datagram = try server.recv(&buf, 0);
-        const message = mdns.DnsMessage.parse(datagram.data);
+        const message = dns.Message.parse(datagram.data);
         std.debug.print("{}\n", .{message});
     }
 }
 
 test {
     _ = udp;
-    _ = mdns;
+    _ = dns;
 }

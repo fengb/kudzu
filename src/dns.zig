@@ -1,13 +1,6 @@
 const std = @import("std");
 
 pub const Message = struct {
-    pub fn parse(data: []const u8) ?Message {
-        const base_message = DnsMessage.parse(data);
-        return base_message;
-    }
-};
-
-pub const DnsMessage = struct {
     identification: u16,
     flags: packed struct(u16) {
         qr: enum(u1) { query = 0, response = 1 },
@@ -32,8 +25,8 @@ pub const DnsMessage = struct {
     authority_record_start: usize,
     additional_record_start: usize,
 
-    pub fn parse(data: []const u8) !DnsMessage {
-        const msg_stub: DnsMessage = undefined;
+    pub fn parse(data: []const u8) !Message {
+        const msg_stub: Message = undefined;
 
         var fbs = std.io.fixedBufferStream(data);
         const reader = fbs.reader();
@@ -72,7 +65,7 @@ pub const DnsMessage = struct {
         class: u16,
     };
 
-    pub fn iterQuestions(self: DnsMessage) QuestionIterator {
+    pub fn iterQuestions(self: Message) QuestionIterator {
         var fbs = std.io.fixedBufferStream(self.raw[0..self.answer_record_start]);
         fbs.seekTo(self.question_start) catch unreachable;
         return QuestionIterator{ .fbs = fbs };
@@ -206,11 +199,11 @@ test EncodedString {
     }
 }
 
-test DnsMessage {
+test Message {
     var buffer: [0x1000]u8 = undefined;
     {
         const questions1 = @embedFile("test-data/questions1.dns");
-        const message = try DnsMessage.parse(questions1);
+        const message = try Message.parse(questions1);
 
         try std.testing.expectEqual(@as(usize, 2), message.question_count);
         var iter = message.iterQuestions();
@@ -226,7 +219,7 @@ test DnsMessage {
 
     {
         const questions2 = @embedFile("test-data/questions2.dns");
-        const message = try DnsMessage.parse(questions2);
+        const message = try Message.parse(questions2);
         std.debug.print("{any}\n", .{message});
         var iter = message.iterQuestions();
         while (iter.next()) |question| {
