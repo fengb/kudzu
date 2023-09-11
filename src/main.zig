@@ -17,7 +17,7 @@ pub fn main() !void {
     var buf: [0x1000]u8 = undefined;
     while (true) {
         const datagram = try server.recv(&buf, 0);
-        const message = dns.Message.parse(datagram.data);
+        const message = try dns.parse(datagram.data);
         std.debug.print("{}\n", .{message});
     }
 }
