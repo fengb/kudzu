@@ -1,7 +1,7 @@
 const std = @import("std");
 const dns = @import("../dns.zig");
 
-pub fn dump(msg: dns.Message, buffer: []u8) ![]const u8 {
+pub fn encode(msg: dns.Message, buffer: []u8) ![]const u8 {
     var ctx = Context.init(buffer);
     const writer = ctx.fbs.writer();
 
@@ -133,7 +133,7 @@ test splitDns {
     }
 }
 
-test dump {
+test encode {
     var buf: [0x1000]u8 = undefined;
     {
         const msg = dns.Message{
@@ -144,7 +144,7 @@ test dump {
             .authorities = &.{},
             .additionals = &.{},
         };
-        const result = try dump(msg, &buf);
+        const result = try encode(msg, &buf);
 
         try std.testing.expectEqual(@as(usize, 12), result.len);
         // Yay big endian

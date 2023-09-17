@@ -1,24 +1,8 @@
 const std = @import("std");
 const dns = @import("../dns.zig");
 
-const EncodedMessage = @This();
-
-// Header
-identification: u16,
-flags: dns.Flags,
-question_count: u16,
-answer_record_count: u16,
-authority_record_count: u16,
-additional_record_count: u16,
-
-raw: []const u8,
-comptime question_start: comptime_int = 12,
-answer_record_start: usize,
-authority_record_start: usize,
-additional_record_start: usize,
-
-pub fn parse(data: []const u8) !EncodedMessage {
-    const msg_stub: EncodedMessage = undefined;
+pub fn decode(data: []const u8) !Message {
+    const msg_stub: Message = undefined;
 
     var fbs = std.io.fixedBufferStream(data);
     const reader = fbs.reader();
@@ -65,24 +49,62 @@ pub fn parse(data: []const u8) !EncodedMessage {
     };
 }
 
-pub fn iterQuestions(self: EncodedMessage) Iterator(Question) {
-    return Iterator(Question).init(self.raw, self.question_start, self.answer_record_start);
-}
 
-pub fn iterAnswers(self: EncodedMessage) Iterator(Record) {
-    return Iterator(Record).init(self.raw, self.answer_record_start, self.authority_record_start);
-}
+const Message = struct {
+    // Header
+    identification: u16,
+    flags: dns.Flags,
+    question_count: u16,
+    answer_record_count: u16,
+    authority_record_count: u16,
+    additional_record_count: u16,
 
-pub fn iterAuthorities(self: EncodedMessage) Iterator(Record) {
-    return Iterator(Record).init(self.raw, self.authority_record_start, self.additional_record_start);
-}
+    raw: []const u8,
+    comptime question_start: comptime_int = 12,
+    answer_record_start: usize,
+    authority_record_start: usize,
+    additional_record_start: usize,
 
-pub fn iterAdditionals(self: EncodedMessage) Iterator(Record) {
-    return Iterator(Record).init(self.raw, self.additional_record_start, self.raw.len);
-}
+    pub fn iterQuestions(self: Message) Iterator(Question) {
+        return Iterator(Question).init(self.raw, self.question_start, self.answer_record_start);
+    }
+
+    pub fn iterAnswers(self: Message) Iterator(Record) {
+        return Iterator(Record).init(self.raw, self.answer_record_start, self.authority_record_start);
+    }
+
+    pub fn iterAuthorities(self: Message) Iterator(Record) {
+        return Iterator(Record).init(self.raw, self.authority_record_start, self.additional_record_start);
+    }
+
+    pub fn iterAdditionals(self: Message) Iterator(Record) {
+        return Iterator(Record).init(self.raw, self.additional_record_start, self.raw.len);
+    }
+
+    fn Iterator(comptime T: type) type {
+        return struct {
+            fbs: std.io.FixedBufferStream([]const u8),
+
+            fn init(raw: []const u8, start: usize, end: usize) @This() {
+                var fbs = std.io.fixedBufferStream(raw[0..end]);
+                fbs.seekTo(start) catch unreachable;
+                return .{ .fbs = fbs };
+            }
+
+            pub fn next(self: *@This()) ?T {
+                if (self.fbs.pos >= self.fbs.buffer.len) {
+                    return null;
+                }
+
+                return T.read(&self.fbs) catch unreachable;
+            }
+        };
+    }
+
+};
 
 const Question = struct {
-    name: EncodedString,
+    name: String,
     type: u16,
     class: u16,
 
@@ -90,7 +112,7 @@ const Question = struct {
         const reader = fbs.reader();
 
         return Question{
-            .name = try EncodedString.readFirst(fbs),
+            .name = try String.readFirst(fbs),
             .type = try reader.readIntBig(u16),
             .class = try reader.readIntBig(u16),
         };
@@ -98,7 +120,7 @@ const Question = struct {
 };
 
 const Record = struct {
-    name: EncodedString,
+    name: String,
     type: u16,
     class: u16,
     ttl: u32,
@@ -108,7 +130,7 @@ const Record = struct {
         const reader = fbs.reader();
 
         return Record{
-            .name = try EncodedString.readFirst(fbs),
+            .name = try String.readFirst(fbs),
             .type = try reader.readIntBig(u16),
             .class = try reader.readIntBig(u16),
             .ttl = try reader.readIntBig(u32),
@@ -122,31 +144,11 @@ const Record = struct {
     }
 };
 
-fn Iterator(comptime T: type) type {
-    return struct {
-        fbs: std.io.FixedBufferStream([]const u8),
-
-        fn init(raw: []const u8, start: usize, end: usize) @This() {
-            var fbs = std.io.fixedBufferStream(raw[0..end]);
-            fbs.seekTo(start) catch unreachable;
-            return .{ .fbs = fbs };
-        }
-
-        pub fn next(self: *@This()) ?T {
-            if (self.fbs.pos >= self.fbs.buffer.len) {
-                return null;
-            }
-
-            return T.read(&self.fbs) catch unreachable;
-        }
-    };
-}
-
-pub const EncodedString = struct {
+pub const String = struct {
     data: []const u8,
     start: usize,
 
-    pub fn readFirst(stream: *std.io.FixedBufferStream([]const u8)) !EncodedString {
+    pub fn readFirst(stream: *std.io.FixedBufferStream([]const u8)) !String {
         const start = stream.pos;
         var end_index: usize = 0;
         while (try StringIterator.nextRaw(stream, &end_index)) |_| {
@@ -159,10 +161,10 @@ pub const EncodedString = struct {
             return error.EndOfStream;
         }
 
-        return EncodedString{ .data = stream.buffer, .start = start };
+        return String{ .data = stream.buffer, .start = start };
     }
 
-    pub fn iterSegments(self: EncodedString) StringIterator {
+    pub fn iterSegments(self: String) StringIterator {
         var fbs = std.io.fixedBufferStream(self.data);
         fbs.seekTo(self.start) catch unreachable;
         return StringIterator{ .fbs = fbs };
@@ -200,7 +202,7 @@ pub const EncodedString = struct {
     };
 
     pub fn format(
-        self: EncodedString,
+        self: String,
         comptime _: []const u8,
         _: std.fmt.FormatOptions,
         writer: anytype,
@@ -216,12 +218,12 @@ pub const EncodedString = struct {
     }
 };
 
-test EncodedString {
+test String {
     var buffer: [0x1000]u8 = undefined;
     {
         var fbs = std.io.fixedBufferStream("\x03www\x0dxyzindustries\x03com\x00");
 
-        const es = try EncodedString.readFirst(&fbs);
+        const es = try String.readFirst(&fbs);
         try std.testing.expectEqualStrings("www.xyzindustries.com", try std.fmt.bufPrint(&buffer, "{}", .{es}));
     }
 
@@ -233,26 +235,26 @@ test EncodedString {
             // Prefix followed by compression
             "\x02qq\xc0\x04");
 
-        const es1 = try EncodedString.readFirst(&fbs);
+        const es1 = try String.readFirst(&fbs);
         try std.testing.expectEqualStrings("www.abc.xyz", try std.fmt.bufPrint(&buffer, "{}", .{es1}));
 
         // Ensure the fbs is reading in the correct location
         try std.testing.expectEqual(@as(u8, 0xc0), fbs.buffer[fbs.pos]);
-        const es2 = try EncodedString.readFirst(&fbs);
+        const es2 = try String.readFirst(&fbs);
         try std.testing.expectEqualStrings("abc.xyz", try std.fmt.bufPrint(&buffer, "{}", .{es2}));
 
         // Ensure the fbs is reading in the correct location
         try std.testing.expectEqual(@as(u8, 0x02), fbs.buffer[fbs.pos]);
-        const es3 = try EncodedString.readFirst(&fbs);
+        const es3 = try String.readFirst(&fbs);
         try std.testing.expectEqualStrings("qq.abc.xyz", try std.fmt.bufPrint(&buffer, "{}", .{es3}));
     }
 }
 
-test EncodedMessage {
+test Message {
     var buffer: [0x1000]u8 = undefined;
     {
         const questions1 = @embedFile("../test-data/questions1.dns");
-        const message = try EncodedMessage.parse(questions1);
+        const message = try decode(questions1);
 
         try std.testing.expectEqual(@as(usize, 2), message.question_count);
         var iter = message.iterQuestions();
@@ -268,7 +270,7 @@ test EncodedMessage {
 
     {
         const questions2 = @embedFile("../test-data/questions2.dns");
-        const message = try EncodedMessage.parse(questions2);
+        const message = try decode(questions2);
 
         {
             var iter = message.iterQuestions();
