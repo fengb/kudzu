@@ -16,6 +16,33 @@ pub const Flags = packed struct(u16) {
     rcode: u4,
 };
 
+pub const Message = struct {
+    identification: u16,
+    flags: Flags,
+
+    questions: []Question,
+    answers: []Record,
+    authorities: []Record,
+    additionals: []Record,
+
+    pub const Question = struct {
+        name: []const u8,
+        type: u16,
+        class: u16,
+    };
+
+    pub const Record = struct {
+        name: []const u8,
+        type: u16,
+        class: u16,
+        ttl: u32,
+        data: []const u8,
+    };
+
+    pub const dump = @import("dns/dump.zig").dump;
+};
+
 test {
     _ = EncodedMessage;
+    _ = @import("dns/dump.zig");
 }
