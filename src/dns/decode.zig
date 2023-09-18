@@ -50,7 +50,7 @@ pub fn decode(data: []const u8) !Message {
 }
 
 
-const Message = struct {
+pub const Message = struct {
     // Header
     identification: u16,
     flags: dns.Flags,
@@ -66,35 +66,37 @@ const Message = struct {
     additional_record_start: usize,
 
     pub fn iterQuestions(self: Message) Iterator(Question) {
-        return Iterator(Question).init(self.raw, self.question_start, self.answer_record_start);
+        return Iterator(Question).init(self.raw, self.question_start, self.question_count);
     }
 
     pub fn iterAnswers(self: Message) Iterator(Record) {
-        return Iterator(Record).init(self.raw, self.answer_record_start, self.authority_record_start);
+        return Iterator(Record).init(self.raw, self.answer_record_start, self.answer_record_count);
     }
 
     pub fn iterAuthorities(self: Message) Iterator(Record) {
-        return Iterator(Record).init(self.raw, self.authority_record_start, self.additional_record_start);
+        return Iterator(Record).init(self.raw, self.authority_record_start, self.authority_record_count);
     }
 
     pub fn iterAdditionals(self: Message) Iterator(Record) {
-        return Iterator(Record).init(self.raw, self.additional_record_start, self.raw.len);
+        return Iterator(Record).init(self.raw, self.additional_record_start, self.additional_record_count);
     }
 
     fn Iterator(comptime T: type) type {
         return struct {
             fbs: std.io.FixedBufferStream([]const u8),
+            remaining: usize,
 
-            fn init(raw: []const u8, start: usize, end: usize) @This() {
-                var fbs = std.io.fixedBufferStream(raw[0..end]);
+            fn init(raw: []const u8, start: usize, total: usize) @This() {
+                var fbs = std.io.fixedBufferStream(raw);
                 fbs.seekTo(start) catch unreachable;
-                return .{ .fbs = fbs };
+                return .{ .fbs = fbs, .remaining = total };
             }
 
             pub fn next(self: *@This()) ?T {
-                if (self.fbs.pos >= self.fbs.buffer.len) {
+                if (self.remaining == 0) {
                     return null;
                 }
+                self.remaining -= 1;
 
                 return T.read(&self.fbs) catch unreachable;
             }
@@ -103,7 +105,7 @@ const Message = struct {
 
 };
 
-const Question = struct {
+pub const Question = struct {
     name: String,
     type: u16,
     class: u16,
@@ -119,7 +121,7 @@ const Question = struct {
     }
 };
 
-const Record = struct {
+pub const Record = struct {
     name: String,
     type: u16,
     class: u16,
@@ -144,7 +146,7 @@ const Record = struct {
     }
 };
 
-pub const String = struct {
+const String = struct {
     data: []const u8,
     start: usize,
 

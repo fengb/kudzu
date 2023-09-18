@@ -1,6 +1,10 @@
 const std = @import("std");
 pub const decode = @import("dns/decode.zig").decode;
 pub const encode = @import("dns/encode.zig").encode;
+const parse = @import("dns/parse.zig");
+
+pub const parseAlloc = parse.parseAlloc;
+pub const parseFree = parse.parseFree;
 
 pub const Flags = packed struct(u16) {
     qr: enum(u1) { query = 0, response = 1 },
@@ -19,27 +23,28 @@ pub const Message = struct {
     identification: u16,
     flags: Flags,
 
-    questions: []Question,
-    answers: []Record,
-    authorities: []Record,
-    additionals: []Record,
+    questions: []const Question,
+    answers: []const Record,
+    authorities: []const Record,
+    additionals: []const Record,
+};
 
-    pub const Question = struct {
-        name: []const u8,
-        type: u16,
-        class: u16,
-    };
+pub const Question = struct {
+    name: []const u8,
+    type: u16,
+    class: u16,
+};
 
-    pub const Record = struct {
-        name: []const u8,
-        type: u16,
-        class: u16,
-        ttl: u32,
-        data: []const u8,
-    };
+pub const Record = struct {
+    name: []const u8,
+    type: u16,
+    class: u16,
+    ttl: u32,
+    data: []const u8,
 };
 
 test {
     _ = decode;
     _ = encode;
+    _ = parse;
 }

@@ -104,7 +104,7 @@ const Context = struct {
         return ctx.writeName(rest);
     }
 
-    fn writeRecord(ctx: *Context, record: dns.Message.Record) !void {
+    fn writeRecord(ctx: *Context, record: dns.Record) !void {
         const writer = ctx.fbs.writer();
         try ctx.writeName(record.name);
         try writer.writeIntBig(u16, record.type);
