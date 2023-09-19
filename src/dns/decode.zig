@@ -49,7 +49,6 @@ pub fn decode(data: []const u8) !Message {
     };
 }
 
-
 pub const Message = struct {
     // Header
     identification: u16,
@@ -102,7 +101,6 @@ pub const Message = struct {
             }
         };
     }
-
 };
 
 pub const Question = struct {
@@ -153,7 +151,7 @@ const String = struct {
     pub fn readFirst(stream: *std.io.FixedBufferStream([]const u8)) !String {
         const start = stream.pos;
         var end_index: usize = 0;
-        while (try StringIterator.nextRaw(stream, &end_index)) |_| {
+        while (try Iterator.nextRaw(stream, &end_index)) |_| {
             // TODO: validate ASCII
         }
         if (end_index > 0) {
@@ -166,16 +164,42 @@ const String = struct {
         return String{ .data = stream.buffer, .start = start };
     }
 
-    pub fn iterSegments(self: String) StringIterator {
-        var fbs = std.io.fixedBufferStream(self.data);
-        fbs.seekTo(self.start) catch unreachable;
-        return StringIterator{ .fbs = fbs };
+    /// Returns true if this is equivalent to a real string
+    /// Since DNS does not encode non-alphanumeric, it's never *really* equal
+    /// e.g. john@gmail.com has the same wire format as john.gmail.com
+    pub fn equiv(self: String, other: []const u8) bool {
+        var remaining = other;
+        var iter = self.iterSegments();
+
+        const first = iter.next() orelse return remaining.len == 0;
+        if (!std.mem.startsWith(u8, remaining, first)) {
+            return false;
+        }
+        remaining = remaining[first.len..];
+        while (iter.next()) |segment| {
+            if (remaining.len < 0 or !isDnsSeparator(remaining[0])) {
+                return false;
+            }
+            remaining = remaining[1..];
+
+            if (!std.mem.startsWith(u8, remaining, segment)) {
+                return false;
+            }
+            remaining = remaining[segment.len..];
+        }
+        return remaining.len == 0;
     }
 
-    const StringIterator = struct {
+    pub fn iterSegments(self: String) Iterator {
+        var fbs = std.io.fixedBufferStream(self.data);
+        fbs.seekTo(self.start) catch unreachable;
+        return Iterator{ .fbs = fbs };
+    }
+
+    const Iterator = struct {
         fbs: std.io.FixedBufferStream([]const u8),
 
-        pub fn next(iter: *StringIterator) ?[]const u8 {
+        pub fn next(iter: *Iterator) ?[]const u8 {
             var ignore: usize = 69;
             return nextRaw(&iter.fbs, &ignore) catch unreachable;
         }
@@ -220,11 +244,21 @@ const String = struct {
     }
 };
 
+fn isDnsSeparator(char: u8) bool {
+    return switch (char) {
+        '0'...'9',
+        'A'...'Z',
+        'a'...'z',
+        '_',
+        => false,
+        else => true,
+    };
+}
+
 test String {
     var buffer: [0x1000]u8 = undefined;
     {
         var fbs = std.io.fixedBufferStream("\x03www\x0dxyzindustries\x03com\x00");
-
         const es = try String.readFirst(&fbs);
         try std.testing.expectEqualStrings("www.xyzindustries.com", try std.fmt.bufPrint(&buffer, "{}", .{es}));
     }
@@ -250,6 +284,16 @@ test String {
         const es3 = try String.readFirst(&fbs);
         try std.testing.expectEqualStrings("qq.abc.xyz", try std.fmt.bufPrint(&buffer, "{}", .{es3}));
     }
+}
+
+test "String.equiv" {
+    var fbs = std.io.fixedBufferStream("\x03www\x0dxyzindustries\x03com\x00");
+    const str = try String.readFirst(&fbs);
+    try std.testing.expect(str.equiv("www.xyzindustries.com"));
+    try std.testing.expect(str.equiv("www@xyzindustries.com"));
+    try std.testing.expect(!str.equiv("foo.bar"));
+    try std.testing.expect(!str.equiv("www@xyzindustries.comm"));
+    try std.testing.expect(!str.equiv("www@xyz"));
 }
 
 test Message {
