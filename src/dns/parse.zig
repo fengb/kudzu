@@ -68,7 +68,7 @@ fn parseQuestions(allocator: std.mem.Allocator, iter: ReturnType(decode.Message.
         questions.appendAssumeCapacity(.{
             .name = name,
             .type = decoded_question.type,
-            .class = decoded_question.type,
+            .class = decoded_question.class,
         });
     }
     return questions.items;

@@ -15,7 +15,7 @@ pub fn encode(msg: dns.Message, buffer: []u8) ![]const u8 {
     std.debug.assert(ctx.fbs.pos == 12);
     for (msg.questions) |question| {
         try ctx.writeName(question.name);
-        try writer.writeIntBig(u16, question.type);
+        try writer.writeIntBig(u16, @intFromEnum(question.type));
         try writer.writeIntBig(u16, question.class);
     }
 
@@ -107,7 +107,7 @@ const Context = struct {
     fn writeRecord(ctx: *Context, record: dns.Record) !void {
         const writer = ctx.fbs.writer();
         try ctx.writeName(record.name);
-        try writer.writeIntBig(u16, record.type);
+        try writer.writeIntBig(u16, @intFromEnum(record.type));
         try writer.writeIntBig(u16, record.class);
         try writer.writeIntBig(u32, record.ttl);
         try writer.writeIntBig(u16, @intCast(record.data.len));

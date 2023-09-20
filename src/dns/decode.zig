@@ -105,7 +105,7 @@ pub const Message = struct {
 
 pub const Question = struct {
     name: String,
-    type: u16,
+    type: dns.ResourceType,
     class: u16,
 
     fn read(fbs: *std.io.FixedBufferStream([]const u8)) !Question {
@@ -113,7 +113,7 @@ pub const Question = struct {
 
         return Question{
             .name = try String.readFirst(fbs),
-            .type = try reader.readIntBig(u16),
+            .type = @enumFromInt(try reader.readIntBig(u16)),
             .class = try reader.readIntBig(u16),
         };
     }
@@ -121,7 +121,7 @@ pub const Question = struct {
 
 pub const Record = struct {
     name: String,
-    type: u16,
+    type: dns.ResourceType,
     class: u16,
     ttl: u32,
     data: []const u8,
@@ -131,7 +131,7 @@ pub const Record = struct {
 
         return Record{
             .name = try String.readFirst(fbs),
-            .type = try reader.readIntBig(u16),
+            .type = @enumFromInt(try reader.readIntBig(u16)),
             .class = try reader.readIntBig(u16),
             .ttl = try reader.readIntBig(u32),
             .data = blk: {
@@ -306,9 +306,11 @@ test Message {
         var iter = message.iterQuestions();
 
         const question1 = iter.next() orelse return error.NotEnoughQuestions;
+        try std.testing.expectEqual(dns.ResourceType.A, question1.type);
         try std.testing.expectEqualStrings("foobar.local", try std.fmt.bufPrint(&buffer, "{}", .{question1.name}));
 
         const question2 = iter.next() orelse return error.NotEnoughQuestions;
+        try std.testing.expectEqual(dns.ResourceType.AAAA, question2.type);
         try std.testing.expectEqualStrings("foobar.local", try std.fmt.bufPrint(&buffer, "{}", .{question2.name}));
 
         try std.testing.expectEqual(iter.next(), null);
